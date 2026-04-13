@@ -124,7 +124,8 @@
         떨어지는 도넛을 터치해서 캐치하세요!<br>
         도넛마다 점수가 달라요!<br>
         커피는 보너스 포인트!<br>
-        20초 안에 최고 점수를 노려보세요!
+        25초 안에 최고 점수를 노려보세요!
+        마지막 7초는 FEVER TIME! (점수 3배!)
     </div>
     <button class="start-btn" onclick="startGame()">게임 시작</button>
     <div class="ranking-section" style="margin-top:1.5rem;">
@@ -209,8 +210,10 @@ function playNote(freq, dur, type, vol, delay) {
 
 function playCatchSfx() { playNote(523, 0.08, 'sine', 0.12); playNote(659, 0.08, 'sine', 0.1, 0.04); }
 function playBonusSfx() { playNote(523, 0.06, 'sine', 0.1); playNote(659, 0.06, 'sine', 0.08, 0.04); playNote(784, 0.1, 'sine', 0.08, 0.08); }
+function playFeverCatchSfx() { playNote(784, 0.06, 'sawtooth', 0.12); playNote(988, 0.06, 'sawtooth', 0.1, 0.03); playNote(1175, 0.08, 'sine', 0.08, 0.06); }
 function playMissSfx() { playNote(200, 0.15, 'triangle', 0.06); }
 function playEndSfx() { playNote(523, 0.15, 'sine', 0.1); playNote(392, 0.2, 'sine', 0.1, 0.1); playNote(330, 0.3, 'sine', 0.12, 0.2); }
+function playFeverStartSfx() { for(let i=0;i<6;i++) playNote(400+i*100, 0.1, 'sawtooth', 0.1, i*0.05); playNote(1000, 0.3, 'sine', 0.15, 0.3); }
 
 // BGM - cheerful loop
 let bgmInterval = null, bgmPlaying = false;
@@ -301,6 +304,73 @@ function stopBGM() {
     bgmPlaying = false;
     if (bgmInterval) { clearInterval(bgmInterval); bgmInterval = null; }
     if (bgmGain) { bgmGain.gain.setValueAtTime(0, audioCtx.currentTime); }
+}
+
+function startFeverBGM() {
+    if (bgmPlaying || !audioCtx) return;
+    bgmPlaying = true;
+    bgmGain = audioCtx.createGain();
+    bgmGain.gain.value = 0.4;
+    bgmGain.connect(audioCtx.destination);
+
+    let beat = 0;
+    const melody = [523, 587, 659, 784, 880, 784, 659, 587, 523, 659, 784, 880, 988, 880, 784, 659];
+    const bass = [262, 262, 330, 330, 392, 392, 349, 349, 262, 262, 330, 330, 392, 392, 349, 349];
+    const bpm = 200;
+    const beatMs = 60000 / bpm;
+
+    bgmInterval = setInterval(() => {
+        if (!audioCtx) return;
+        const idx = beat % 16;
+        const t = audioCtx.currentTime;
+
+        // Fast melody
+        const melOsc = audioCtx.createOscillator();
+        const melG = audioCtx.createGain();
+        melOsc.type = 'sawtooth';
+        melOsc.frequency.value = melody[idx];
+        melG.gain.setValueAtTime(0.06, t);
+        melG.gain.exponentialRampToValueAtTime(0.001, t + beatMs/1000 * 0.7);
+        melOsc.connect(melG); melG.connect(bgmGain);
+        melOsc.start(t); melOsc.stop(t + beatMs/1000 * 0.7);
+
+        // Heavy bass
+        const bassOsc = audioCtx.createOscillator();
+        const bassG = audioCtx.createGain();
+        bassOsc.type = 'square';
+        bassOsc.frequency.value = bass[idx];
+        bassG.gain.setValueAtTime(0.08, t);
+        bassG.gain.exponentialRampToValueAtTime(0.001, t + beatMs/1000 * 0.8);
+        bassOsc.connect(bassG); bassG.connect(bgmGain);
+        bassOsc.start(t); bassOsc.stop(t + beatMs/1000 * 0.8);
+
+        // Fast kick every beat
+        const kickOsc = audioCtx.createOscillator();
+        const kickG = audioCtx.createGain();
+        kickOsc.type = 'sine';
+        kickOsc.frequency.setValueAtTime(160, t);
+        kickOsc.frequency.exponentialRampToValueAtTime(40, t + 0.06);
+        kickG.gain.setValueAtTime(0.15, t);
+        kickG.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+        kickOsc.connect(kickG); kickG.connect(bgmGain);
+        kickOsc.start(t); kickOsc.stop(t + 0.08);
+
+        // Hi-hat every beat
+        const bufLen = audioCtx.sampleRate * 0.015;
+        const buf = audioCtx.createBuffer(1, bufLen, audioCtx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < bufLen; i++) d[i] = (Math.random() * 2 - 1);
+        const hh = audioCtx.createBufferSource(); hh.buffer = buf;
+        const hhG = audioCtx.createGain();
+        hhG.gain.setValueAtTime(0.06, t);
+        hhG.gain.exponentialRampToValueAtTime(0.001, t + 0.02);
+        const hhF = audioCtx.createBiquadFilter();
+        hhF.type = 'highpass'; hhF.frequency.value = 9000;
+        hh.connect(hhF); hhF.connect(hhG); hhG.connect(bgmGain);
+        hh.start(t);
+
+        beat++;
+    }, beatMs);
 }
 
 // Firebase config
@@ -422,7 +492,8 @@ let gameRunning = false;
 let score = 0;
 let highScore = parseInt(localStorage.getItem('kk_high') || '0');
 let combo = 0;
-let timeLeft = 30;
+let timeLeft = 25;
+let feverMode = false;
 let missCount = 0;
 let donuts = [];
 let particles = [];
@@ -442,8 +513,12 @@ class Donut {
         this.size = 55 + Math.random() * 20;
         this.x = 30 + Math.random() * (W - 60);
         this.y = -this.size;
-        const elapsed = 20 - timeLeft;
-        this.speed = 1.0 + Math.random() * 0.6 + elapsed * 0.08;
+        if (feverMode) {
+            this.speed = 2.5 + Math.random() * 1.5;
+        } else {
+            const elapsed = 25 - timeLeft;
+            this.speed = 1.0 + Math.random() * 0.6 + elapsed * 0.06;
+        }
         this.rotation = Math.random() * Math.PI * 2;
         this.rotSpeed = (Math.random() - 0.5) * 0.05;
         this.caught = false;
@@ -522,17 +597,22 @@ function handleTap(tx, ty) {
         const dist = Math.hypot(d.x - tx, d.y - ty);
         if (dist < d.size * 0.7) {
             // Caught!
-            const points = d.type.points * (1 + combo * 0.1);
+            const feverMultiplier = feverMode ? 3 : 1;
+            const points = d.type.points * (1 + combo * 0.1) * feverMultiplier;
             score += Math.floor(points);
             combo++;
             d.caught = true;
 
-            scorePopups.push(new ScorePopup(d.x, d.y, `+${Math.floor(points)}`, d.type.isCoffee ? '#8B6914' : '#006B3F'));
+            const pointColor = feverMode ? '#FF4500' : (d.type.isCoffee ? '#8B6914' : '#006B3F');
+            scorePopups.push(new ScorePopup(d.x, d.y, `+${Math.floor(points)}${feverMode ? ' x3!' : ''}`, pointColor));
             if (combo > 1) scorePopups.push(new ScorePopup(d.x, d.y + 20, `${combo} COMBO!`, '#C8102E'));
 
-            for (let j = 0; j < 8; j++) particles.push(new Particle(d.x, d.y, d.type.color));
+            const particleCount = feverMode ? 15 : 8;
+            for (let j = 0; j < particleCount; j++) particles.push(new Particle(d.x, d.y, feverMode ? '#FF4500' : d.type.color));
 
-            if (d.type.isCoffee) playBonusSfx(); else playCatchSfx();
+            if (feverMode) playFeverCatchSfx();
+            else if (d.type.isCoffee) playBonusSfx();
+            else playCatchSfx();
 
             document.getElementById('scoreText').textContent = score + '점';
             document.getElementById('comboText').textContent = combo > 1 ? `${combo} COMBO!` : '';
@@ -551,8 +631,21 @@ canvas.addEventListener('click', e => handleTap(e.clientX, e.clientY));
 canvas.addEventListener('touchstart', e => { e.preventDefault(); handleTap(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
 
 function drawBackground() {
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, W, H);
+    if (feverMode) {
+        // Fever mode - pulsing warm background
+        const pulse = Math.sin(Date.now() * 0.008) * 0.03;
+        ctx.fillStyle = `rgba(255, ${220 + Math.floor(pulse * 200)}, ${200 + Math.floor(pulse * 200)}, 1)`;
+        ctx.fillRect(0, 0, W, H);
+
+        // Fever text
+        ctx.fillStyle = `rgba(255, 69, 0, ${0.15 + Math.sin(Date.now() * 0.01) * 0.1})`;
+        ctx.font = 'bold 60px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('FEVER TIME! x3', W / 2, H / 2 - 30);
+    } else {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, W, H);
+    }
 
     // Logo - crisp and clear
     if (imgLogo.complete && imgLogo.naturalWidth > 0) {
@@ -581,10 +674,15 @@ function getCouponMessage(s) {
 function gameLoop() {
     if (!gameRunning) return;
 
-    // Spawn - starts slow, gradually gets faster
-    const elapsed = 20 - timeLeft;
-    const spawnRate = Math.max(15, 50 - elapsed * 1.5);
-    if (Math.random() < 1 / spawnRate) donuts.push(new Donut());
+    // Spawn - starts slow, fever mode at end
+    if (feverMode) {
+        const feverSpawn = 5;
+        if (Math.random() < 1 / feverSpawn) donuts.push(new Donut());
+    } else {
+        const elapsed = 25 - timeLeft;
+        const spawnRate = Math.max(18, 50 - elapsed * 1.2);
+        if (Math.random() < 1 / spawnRate) donuts.push(new Donut());
+    }
 
     // Update
     donuts.forEach(d => d.update());
@@ -621,12 +719,13 @@ function startGame() {
     document.getElementById('gameOverScreen').classList.add('hidden');
     document.getElementById('hud').classList.remove('hidden');
 
-    score = 0; combo = 0; timeLeft = 20; missCount = 0;
+    score = 0; combo = 0; timeLeft = 25; missCount = 0; feverMode = false;
     donuts = []; particles = []; scorePopups = [];
 
     document.getElementById('scoreText').textContent = '0점';
     document.getElementById('comboText').textContent = '';
-    document.getElementById('timeText').textContent = '20초';
+    document.getElementById('timeText').textContent = '25초';
+    document.getElementById('timeText').style.color = '#333';
     document.getElementById('missText').textContent = '';
 
     initAudio();
@@ -635,7 +734,14 @@ function startGame() {
 
     gameTimer = setInterval(() => {
         timeLeft--;
-        document.getElementById('timeText').textContent = `${timeLeft}초`;
+        if (timeLeft === 7 && !feverMode) {
+            feverMode = true;
+            playFeverStartSfx();
+            stopBGM();
+            startFeverBGM();
+            document.getElementById('timeText').style.color = '#FF4500';
+        }
+        document.getElementById('timeText').textContent = feverMode ? `${timeLeft}초 FEVER!` : `${timeLeft}초`;
         if (timeLeft <= 0) gameOver();
     }, 1000);
 
