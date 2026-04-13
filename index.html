@@ -137,7 +137,6 @@
     <img src="kk_logo.png" width="160" style="margin-bottom:1rem;">
     <div class="game-subtitle">게임 종료!</div>
     <div class="score-display" id="finalScore">0</div>
-    <div class="coupon-msg" id="couponMsg"></div>
     <div class="name-input-wrap" id="nameWrap">
         <input type="text" id="nameInput" placeholder="이름 입력" maxlength="8">
         <button onclick="submitScore()">등록</button>
@@ -162,6 +161,8 @@
 
 <canvas id="gameCanvas"></canvas>
 
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script>
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -176,6 +177,7 @@ const imgOriginal = new Image(); imgOriginal.src = 'donut_original.png';
 const imgChoco = new Image(); imgChoco.src = 'donut_choco.png';
 const imgStrawberry = new Image(); imgStrawberry.src = 'donut_strawberry.png';
 const imgLogo = new Image(); imgLogo.src = 'kk_logo.png';
+const imgCoffee = new Image(); imgCoffee.src = 'coffee.png';
 
 const donutTypes = [
     { img: null, name: '오리지널 글레이즈드', points: 10, color: '#D4A574', weight: 40 },
@@ -217,7 +219,7 @@ function startBGM() {
     if (bgmPlaying || !audioCtx) return;
     bgmPlaying = true;
     bgmGain = audioCtx.createGain();
-    bgmGain.gain.value = 0.12;
+    bgmGain.gain.value = 0.35;
     bgmGain.connect(audioCtx.destination);
 
     let beat = 0;
@@ -301,16 +303,64 @@ function stopBGM() {
     if (bgmGain) { bgmGain.gain.setValueAtTime(0, audioCtx.currentTime); }
 }
 
-// Ranking system
-function getRankings() {
+// Firebase config
+const firebaseConfig = {
+    apiKey: "AIzaSyA1Ako6g5ratG37-l2C0NWs0_b6S5qdNJ8",
+    authDomain: "krispykreme-game.firebaseapp.com",
+    projectId: "krispykreme-game",
+    storageBucket: "krispykreme-game.firebasestorage.app",
+    messagingSenderId: "892904322375",
+    appId: "1:892904322375:web:bf2c82e9dae4163e05c862",
+    databaseURL: "https://krispykreme-game-default-rtdb.firebaseio.com"
+};
+
+let db = null;
+let firebaseReady = false;
+
+function initFirebase() {
+    try {
+        const app = firebase.initializeApp(firebaseConfig);
+        db = firebase.database();
+        firebaseReady = true;
+        console.log('Firebase connected!');
+        loadRankings('startRankingList');
+    } catch(e) {
+        console.log('Firebase init failed, using local:', e);
+    }
+}
+
+// Ranking system - Firebase + localStorage fallback
+function loadRankings(targetId) {
+    if (firebaseReady && db) {
+        db.ref('rankings').orderByChild('score').limitToLast(10).once('value', snap => {
+            const data = snap.val();
+            const rankings = data ? Object.values(data).sort((a, b) => b.score - a.score) : [];
+            renderRankingsList(rankings, -1, targetId);
+        });
+    } else {
+        const rankings = getLocalRankings();
+        renderRankingsList(rankings, -1, targetId);
+    }
+}
+
+function getLocalRankings() {
     try { return JSON.parse(localStorage.getItem('kk_rankings') || '[]'); }
     catch { return []; }
 }
-function saveRankings(rankings) {
-    localStorage.setItem('kk_rankings', JSON.stringify(rankings.slice(0, 10)));
-}
+
 function renderRankings(currentScore, targetId) {
-    const rankings = getRankings();
+    if (firebaseReady && db) {
+        db.ref('rankings').orderByChild('score').limitToLast(10).once('value', snap => {
+            const data = snap.val();
+            const rankings = data ? Object.values(data).sort((a, b) => b.score - a.score) : [];
+            renderRankingsList(rankings, currentScore, targetId);
+        });
+    } else {
+        renderRankingsList(getLocalRankings(), currentScore, targetId);
+    }
+}
+
+function renderRankingsList(rankings, currentScore, targetId) {
     const list = document.getElementById(targetId || 'rankingList');
     list.innerHTML = '';
     if (rankings.length === 0) {
@@ -320,21 +370,50 @@ function renderRankings(currentScore, targetId) {
     rankings.forEach((r, i) => {
         const li = document.createElement('li');
         if (r.score === currentScore && r.isNew) li.className = 'current';
-        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}`;
+        const medal = i === 0 ? '\u{1F947}' : i === 1 ? '\u{1F948}' : i === 2 ? '\u{1F949}' : `${i+1}`;
         li.innerHTML = `<span class="rank">${medal}</span><span class="name">${r.name}</span><span class="pts">${r.score}점</span>`;
         list.appendChild(li);
     });
 }
+
 function submitScore() {
     const nameInput = document.getElementById('nameInput');
     const name = nameInput.value.trim() || '익명';
-    const rankings = getRankings();
-    // Remove isNew flag from all
-    rankings.forEach(r => r.isNew = false);
-    rankings.push({ name, score, isNew: true });
-    rankings.sort((a, b) => b.score - a.score);
-    saveRankings(rankings.slice(0, 10));
-    renderRankings(score, 'rankingList');
+
+    if (firebaseReady && db) {
+        // Save to Firebase
+        db.ref('rankings').push({
+            name: name,
+            score: score,
+            timestamp: Date.now(),
+            isNew: true
+        }).then(() => {
+            // Load and display updated rankings
+            db.ref('rankings').orderByChild('score').limitToLast(10).once('value', snap => {
+                const data = snap.val();
+                let rankings = data ? Object.values(data).sort((a, b) => b.score - a.score) : [];
+                // Mark the just-submitted one
+                let marked = false;
+                rankings.forEach(r => {
+                    if (!marked && r.score === score && r.name === name) {
+                        r.isNew = true;
+                        marked = true;
+                    } else {
+                        r.isNew = false;
+                    }
+                });
+                renderRankingsList(rankings, score, 'rankingList');
+            });
+        });
+    } else {
+        // Fallback: localStorage
+        const rankings = getLocalRankings();
+        rankings.forEach(r => r.isNew = false);
+        rankings.push({ name, score, isNew: true });
+        rankings.sort((a, b) => b.score - a.score);
+        localStorage.setItem('kk_rankings', JSON.stringify(rankings.slice(0, 10)));
+        renderRankingsList(rankings.slice(0, 10), score, 'rankingList');
+    }
     document.getElementById('nameWrap').style.display = 'none';
 }
 
@@ -364,7 +443,7 @@ class Donut {
         this.x = 30 + Math.random() * (W - 60);
         this.y = -this.size;
         const elapsed = 20 - timeLeft;
-        this.speed = 1.2 + Math.random() * 0.8 + elapsed * 0.15;
+        this.speed = 1.0 + Math.random() * 0.6 + elapsed * 0.08;
         this.rotation = Math.random() * Math.PI * 2;
         this.rotSpeed = (Math.random() - 0.5) * 0.05;
         this.caught = false;
@@ -381,29 +460,8 @@ class Donut {
         ctx.translate(this.x, this.y);
         ctx.rotate(this.rotation);
 
-        if (this.type.isCoffee) {
-            // Draw coffee cup
-            ctx.fillStyle = '#8B6914';
-            ctx.beginPath();
-            ctx.roundRect(-18, -22, 36, 44, 5);
-            ctx.fill();
-            ctx.fillStyle = '#F5DEB3';
-            ctx.beginPath();
-            ctx.ellipse(0, -18, 16, 6, 0, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = '#fff';
-            ctx.font = 'bold 10px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('KK', 0, 8);
-            // Steam
-            ctx.strokeStyle = 'rgba(200,200,200,0.5)';
-            ctx.lineWidth = 1.5;
-            for (let i = -1; i <= 1; i++) {
-                ctx.beginPath();
-                ctx.moveTo(i * 8, -28);
-                ctx.quadraticCurveTo(i * 8 + 4, -36, i * 8, -42);
-                ctx.stroke();
-            }
+        if (this.type.isCoffee && imgCoffee.complete && imgCoffee.naturalWidth > 0) {
+            ctx.drawImage(imgCoffee, -this.size/2, -this.size/2, this.size, this.size);
         } else if (this.type.img && this.type.img.complete) {
             ctx.drawImage(this.type.img, -this.size/2, -this.size/2, this.size, this.size);
         } else {
@@ -523,9 +581,9 @@ function getCouponMessage(s) {
 function gameLoop() {
     if (!gameRunning) return;
 
-    // Spawn - starts slow, gets fast
+    // Spawn - starts slow, gradually gets faster
     const elapsed = 20 - timeLeft;
-    const spawnRate = Math.max(8, 40 - elapsed * 2.5);
+    const spawnRate = Math.max(15, 50 - elapsed * 1.5);
     if (Math.random() < 1 / spawnRate) donuts.push(new Donut());
 
     // Update
@@ -593,7 +651,6 @@ function gameOver() {
     if (score > highScore) { highScore = score; localStorage.setItem('kk_high', highScore); }
 
     document.getElementById('finalScore').textContent = score + '점';
-    document.getElementById('couponMsg').textContent = getCouponMessage(score);
     document.getElementById('hud').classList.add('hidden');
     document.getElementById('nameWrap').style.display = 'flex';
     document.getElementById('nameInput').value = '';
@@ -602,8 +659,9 @@ function gameOver() {
     setTimeout(() => document.getElementById('gameOverScreen').classList.remove('hidden'), 500);
 }
 
-// Init start screen ranking
-renderRankings(-1, 'startRankingList');
+// Init Firebase and load rankings
+initFirebase();
+
 </script>
 </body>
 </html>
