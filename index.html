@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Krispy Kreme - Donut Catch!</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #ffffff;
+            overflow: hidden;
+            touch-action: none;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        canvas { display: block; }
+
+        #startScreen, #gameOverScreen {
+            position: fixed; inset: 0;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            background: rgba(255, 255, 255, 0.97);
+            z-index: 10;
+            transition: opacity 0.5s;
+        }
+        .hidden { opacity: 0; pointer-events: none !important; }
+
+        .game-title {
+            font-size: clamp(1.8rem, 7vw, 3.5rem);
+            font-weight: 900;
+            color: #006B3F;
+            margin-bottom: 0.3rem;
+        }
+        .game-subtitle {
+            font-size: clamp(0.9rem, 3vw, 1.3rem);
+            color: #C8102E;
+            margin-bottom: 0.5rem;
+            letter-spacing: 3px;
+            font-weight: 700;
+        }
+        .game-desc {
+            color: #666;
+            font-size: clamp(0.75rem, 2.5vw, 0.95rem);
+            text-align: center;
+            line-height: 1.8;
+            margin-bottom: 2rem;
+            padding: 0 2rem;
+        }
+        .start-btn {
+            padding: 1rem 3rem;
+            border: none; border-radius: 50px;
+            background: linear-gradient(135deg, #006B3F, #00A651);
+            color: #fff; font-size: 1.2rem; font-weight: 700;
+            cursor: pointer; letter-spacing: 1px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .start-btn:hover { transform: scale(1.05); box-shadow: 0 10px 40px rgba(0, 107, 63, 0.3); }
+
+        .score-display {
+            font-size: clamp(1.5rem, 5vw, 3rem);
+            font-weight: 900; color: #006B3F;
+            margin: 1rem 0;
+        }
+        .high-score { color: #C8102E; font-size: 1rem; margin-bottom: 1rem; }
+        .coupon-msg {
+            font-size: 1.1rem; font-weight: 700; color: #006B3F;
+            background: #E8F5E9; padding: 0.8rem 1.5rem; border-radius: 12px;
+            margin-bottom: 1rem;
+        }
+        .ranking-section {
+            width: 80%; max-width: 320px; margin-bottom: 1.5rem;
+        }
+        .ranking-title {
+            font-size: 0.9rem; font-weight: 700; color: #006B3F;
+            margin-bottom: 0.5rem; text-align: center;
+        }
+        .ranking-list {
+            list-style: none; background: #f9f9f9; border-radius: 12px;
+            padding: 0.8rem; max-height: 180px; overflow-y: auto;
+        }
+        .ranking-list li {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 0.4rem 0.5rem; font-size: 0.85rem; color: #333;
+            border-bottom: 1px solid #eee;
+        }
+        .ranking-list li:last-child { border-bottom: none; }
+        .ranking-list li .rank { font-weight: 800; color: #006B3F; width: 24px; }
+        .ranking-list li .name { flex: 1; margin: 0 8px; }
+        .ranking-list li .pts { font-weight: 700; color: #C8102E; }
+        .ranking-list li.current { background: #E8F5E9; border-radius: 6px; }
+        .name-input-wrap {
+            display: flex; gap: 8px; margin-bottom: 1rem; align-items: center;
+        }
+        .name-input-wrap input {
+            padding: 0.5rem 0.8rem; border: 2px solid #006B3F; border-radius: 8px;
+            font-size: 1rem; width: 140px; outline: none; text-align: center;
+        }
+        .name-input-wrap button {
+            padding: 0.5rem 1rem; border: none; border-radius: 8px;
+            background: #006B3F; color: #fff; font-weight: 700; cursor: pointer;
+            font-size: 0.9rem;
+        }
+
+        #hud {
+            position: fixed; top: 0; left: 0; right: 0;
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 15px 20px; z-index: 5;
+            background: linear-gradient(to bottom, rgba(255,255,255,0.95), transparent);
+        }
+        .hud-score { color: #006B3F; font-size: 1.3rem; font-weight: 800; }
+        .hud-combo { color: #C8102E; font-size: 0.9rem; font-weight: 600; }
+        .hud-time { color: #333; font-size: 1rem; font-weight: 600; }
+        .hud-miss { color: #999; font-size: 0.8rem; }
+
+        .logo-start { margin-bottom: 1.5rem; }
+    </style>
+</head>
+<body>
+
+<div id="startScreen">
+    <img src="kk_logo.png" class="logo-start" width="200">
+    <div class="game-title">DONUT CATCH!</div>
+    <div class="game-subtitle">도넛 캐치 게임</div>
+    <div class="game-desc">
+        떨어지는 도넛을 터치해서 캐치하세요!<br>
+        도넛마다 점수가 달라요!<br>
+        커피는 보너스 포인트!<br>
+        30초 안에 최고 점수를 노려보세요!
+    </div>
+    <button class="start-btn" onclick="startGame()">게임 시작</button>
+    <div class="ranking-section" style="margin-top:1.5rem;">
+        <div class="ranking-title">RANKING</div>
+        <ol class="ranking-list" id="startRankingList"></ol>
+    </div>
+</div>
+
+<div id="gameOverScreen" class="hidden">
+    <img src="kk_logo.png" width="160" style="margin-bottom:1rem;">
+    <div class="game-subtitle">게임 종료!</div>
+    <div class="score-display" id="finalScore">0</div>
+    <div class="coupon-msg" id="couponMsg"></div>
+    <div class="name-input-wrap" id="nameWrap">
+        <input type="text" id="nameInput" placeholder="이름 입력" maxlength="8">
+        <button onclick="submitScore()">등록</button>
+    </div>
+    <div class="ranking-section">
+        <div class="ranking-title">RANKING</div>
+        <ol class="ranking-list" id="rankingList"></ol>
+    </div>
+    <button class="start-btn" onclick="startGame()">다시 하기</button>
+</div>
+
+<div id="hud" class="hidden">
+    <div>
+        <div class="hud-score" id="scoreText">0점</div>
+        <div class="hud-combo" id="comboText"></div>
+    </div>
+    <div style="text-align:right;">
+        <div class="hud-time" id="timeText">30초</div>
+        <div class="hud-miss" id="missText"></div>
+    </div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+let W, H;
+function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', resize);
+
+// Load images
+const imgOriginal = new Image(); imgOriginal.src = 'donut_original.png';
+const imgChoco = new Image(); imgChoco.src = 'donut_choco.png';
+const imgStrawberry = new Image(); imgStrawberry.src = 'donut_strawberry.png';
+const imgLogo = new Image(); imgLogo.src = 'kk_logo.png';
+
+const donutTypes = [
+    { img: null, name: '오리지널 글레이즈드', points: 10, color: '#D4A574', weight: 40 },
+    { img: null, name: '초코 도넛', points: 20, color: '#5C3317', weight: 30 },
+    { img: null, name: '딸기 하트', points: 30, color: '#FF6B8A', weight: 20 },
+    { img: null, name: '커피 보너스', points: 50, color: '#8B6914', weight: 10, isCoffee: true },
+];
+
+// Assign images after load
+window.addEventListener('load', () => {
+    donutTypes[0].img = imgOriginal;
+    donutTypes[1].img = imgChoco;
+    donutTypes[2].img = imgStrawberry;
+});
+
+// Audio
+let audioCtx = null;
+function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+
+function playNote(freq, dur, type, vol, delay) {
+    if (!audioCtx) return;
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.1, audioCtx.currentTime + (delay||0));
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (delay||0) + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(audioCtx.currentTime + (delay||0)); o.stop(audioCtx.currentTime + (delay||0) + dur);
+}
+
+function playCatchSfx() { playNote(523, 0.08, 'sine', 0.12); playNote(659, 0.08, 'sine', 0.1, 0.04); }
+function playBonusSfx() { playNote(523, 0.06, 'sine', 0.1); playNote(659, 0.06, 'sine', 0.08, 0.04); playNote(784, 0.1, 'sine', 0.08, 0.08); }
+function playMissSfx() { playNote(200, 0.15, 'triangle', 0.06); }
+function playEndSfx() { playNote(523, 0.15, 'sine', 0.1); playNote(392, 0.2, 'sine', 0.1, 0.1); playNote(330, 0.3, 'sine', 0.12, 0.2); }
+
+// BGM - cheerful loop
+let bgmInterval = null, bgmPlaying = false;
+let bgmGain = null;
+function startBGM() {
+    if (bgmPlaying || !audioCtx) return;
+    bgmPlaying = true;
+    bgmGain = audioCtx.createGain();
+    bgmGain.gain.value = 0.12;
+    bgmGain.connect(audioCtx.destination);
+
+    let beat = 0;
+    const melody = [392, 440, 494, 523, 587, 523, 494, 440, 392, 349, 330, 349, 392, 440, 494, 523];
+    const bass =   [196, 196, 220, 220, 262, 262, 247, 247, 196, 196, 220, 220, 262, 262, 247, 247];
+    const bpm = 140;
+    const beatMs = 60000 / bpm;
+
+    bgmInterval = setInterval(() => {
+        if (!audioCtx) return;
+        const idx = beat % 16;
+        const t = audioCtx.currentTime;
+
+        // Melody
+        const melOsc = audioCtx.createOscillator();
+        const melG = audioCtx.createGain();
+        melOsc.type = 'sine';
+        melOsc.frequency.value = melody[idx];
+        melG.gain.setValueAtTime(0.06, t);
+        melG.gain.exponentialRampToValueAtTime(0.001, t + beatMs/1000 * 0.8);
+        melOsc.connect(melG); melG.connect(bgmGain);
+        melOsc.start(t); melOsc.stop(t + beatMs/1000 * 0.8);
+
+        // Bass
+        const bassOsc = audioCtx.createOscillator();
+        const bassG = audioCtx.createGain();
+        bassOsc.type = 'triangle';
+        bassOsc.frequency.value = bass[idx];
+        bassG.gain.setValueAtTime(0.08, t);
+        bassG.gain.exponentialRampToValueAtTime(0.001, t + beatMs/1000 * 0.9);
+        bassOsc.connect(bassG); bassG.connect(bgmGain);
+        bassOsc.start(t); bassOsc.stop(t + beatMs/1000 * 0.9);
+
+        // Kick on every beat
+        const kickOsc = audioCtx.createOscillator();
+        const kickG = audioCtx.createGain();
+        kickOsc.type = 'sine';
+        kickOsc.frequency.setValueAtTime(120, t);
+        kickOsc.frequency.exponentialRampToValueAtTime(40, t + 0.08);
+        kickG.gain.setValueAtTime(idx % 4 === 0 ? 0.12 : 0.06, t);
+        kickG.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+        kickOsc.connect(kickG); kickG.connect(bgmGain);
+        kickOsc.start(t); kickOsc.stop(t + 0.1);
+
+        // Hi-hat on off-beats
+        if (idx % 2 === 1) {
+            const bufLen = audioCtx.sampleRate * 0.02;
+            const buf = audioCtx.createBuffer(1, bufLen, audioCtx.sampleRate);
+            const d = buf.getChannelData(0);
+            for (let i = 0; i < bufLen; i++) d[i] = (Math.random() * 2 - 1);
+            const hh = audioCtx.createBufferSource(); hh.buffer = buf;
+            const hhG = audioCtx.createGain();
+            hhG.gain.setValueAtTime(0.04, t);
+            hhG.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
+            const hhF = audioCtx.createBiquadFilter();
+            hhF.type = 'highpass'; hhF.frequency.value = 8000;
+            hh.connect(hhF); hhF.connect(hhG); hhG.connect(bgmGain);
+            hh.start(t);
+        }
+
+        // Harmony chord on 1st beat of each 4
+        if (idx % 8 === 0) {
+            [1, 1.25, 1.5].forEach(ratio => {
+                const chOsc = audioCtx.createOscillator();
+                const chG = audioCtx.createGain();
+                chOsc.type = 'sine';
+                chOsc.frequency.value = melody[idx] * ratio;
+                chG.gain.setValueAtTime(0.02, t);
+                chG.gain.exponentialRampToValueAtTime(0.001, t + beatMs/1000 * 3);
+                chOsc.connect(chG); chG.connect(bgmGain);
+                chOsc.start(t); chOsc.stop(t + beatMs/1000 * 3);
+            });
+        }
+
+        beat++;
+    }, beatMs);
+}
+function stopBGM() {
+    bgmPlaying = false;
+    if (bgmInterval) { clearInterval(bgmInterval); bgmInterval = null; }
+    if (bgmGain) { bgmGain.gain.setValueAtTime(0, audioCtx.currentTime); }
+}
+
+// Ranking system
+function getRankings() {
+    try { return JSON.parse(localStorage.getItem('kk_rankings') || '[]'); }
+    catch { return []; }
+}
+function saveRankings(rankings) {
+    localStorage.setItem('kk_rankings', JSON.stringify(rankings.slice(0, 10)));
+}
+function renderRankings(currentScore, targetId) {
+    const rankings = getRankings();
+    const list = document.getElementById(targetId || 'rankingList');
+    list.innerHTML = '';
+    if (rankings.length === 0) {
+        list.innerHTML = '<li style="justify-content:center;color:#999;">아직 기록이 없습니다</li>';
+        return;
+    }
+    rankings.forEach((r, i) => {
+        const li = document.createElement('li');
+        if (r.score === currentScore && r.isNew) li.className = 'current';
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}`;
+        li.innerHTML = `<span class="rank">${medal}</span><span class="name">${r.name}</span><span class="pts">${r.score}점</span>`;
+        list.appendChild(li);
+    });
+}
+function submitScore() {
+    const nameInput = document.getElementById('nameInput');
+    const name = nameInput.value.trim() || '익명';
+    const rankings = getRankings();
+    // Remove isNew flag from all
+    rankings.forEach(r => r.isNew = false);
+    rankings.push({ name, score, isNew: true });
+    rankings.sort((a, b) => b.score - a.score);
+    saveRankings(rankings.slice(0, 10));
+    renderRankings(score, 'rankingList');
+    document.getElementById('nameWrap').style.display = 'none';
+}
+
+// Game state
+let gameRunning = false;
+let score = 0;
+let highScore = parseInt(localStorage.getItem('kk_high') || '0');
+let combo = 0;
+let timeLeft = 30;
+let missCount = 0;
+let donuts = [];
+let particles = [];
+let scorePopups = [];
+let gameTimer = null;
+
+function pickDonutType() {
+    const total = donutTypes.reduce((s, d) => s + d.weight, 0);
+    let r = Math.random() * total;
+    for (const d of donutTypes) { r -= d.weight; if (r <= 0) return d; }
+    return donutTypes[0];
+}
+
+class Donut {
+    constructor() {
+        this.type = pickDonutType();
+        this.size = 55 + Math.random() * 20;
+        this.x = 30 + Math.random() * (W - 60);
+        this.y = -this.size;
+        this.speed = 1.5 + Math.random() * 1.5 + (30 - timeLeft) * 0.05;
+        this.rotation = Math.random() * Math.PI * 2;
+        this.rotSpeed = (Math.random() - 0.5) * 0.05;
+        this.caught = false;
+        this.wobble = Math.random() * Math.PI * 2;
+    }
+    update() {
+        this.y += this.speed;
+        this.rotation += this.rotSpeed;
+        this.wobble += 0.03;
+        this.x += Math.sin(this.wobble) * 0.5;
+    }
+    draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.rotation);
+
+        if (this.type.isCoffee) {
+            // Draw coffee cup
+            ctx.fillStyle = '#8B6914';
+            ctx.beginPath();
+            ctx.roundRect(-18, -22, 36, 44, 5);
+            ctx.fill();
+            ctx.fillStyle = '#F5DEB3';
+            ctx.beginPath();
+            ctx.ellipse(0, -18, 16, 6, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('KK', 0, 8);
+            // Steam
+            ctx.strokeStyle = 'rgba(200,200,200,0.5)';
+            ctx.lineWidth = 1.5;
+            for (let i = -1; i <= 1; i++) {
+                ctx.beginPath();
+                ctx.moveTo(i * 8, -28);
+                ctx.quadraticCurveTo(i * 8 + 4, -36, i * 8, -42);
+                ctx.stroke();
+            }
+        } else if (this.type.img && this.type.img.complete) {
+            ctx.drawImage(this.type.img, -this.size/2, -this.size/2, this.size, this.size);
+        } else {
+            // Fallback circle
+            ctx.beginPath();
+            ctx.arc(0, 0, this.size/2, 0, Math.PI * 2);
+            ctx.fillStyle = this.type.color;
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(0, 0, this.size/5, 0, Math.PI * 2);
+            ctx.fillStyle = '#fff';
+            ctx.fill();
+        }
+
+        ctx.restore();
+    }
+}
+
+class ScorePopup {
+    constructor(x, y, text, color) {
+        this.x = x; this.y = y; this.text = text; this.color = color;
+        this.life = 1; this.vy = -2;
+    }
+    update() { this.y += this.vy; this.life -= 0.025; }
+    draw() {
+        ctx.globalAlpha = this.life;
+        ctx.fillStyle = this.color;
+        ctx.font = 'bold 18px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(this.text, this.x, this.y);
+        ctx.globalAlpha = 1;
+    }
+}
+
+class Particle {
+    constructor(x, y, color) {
+        this.x = x; this.y = y;
+        const a = Math.random() * Math.PI * 2;
+        const s = 2 + Math.random() * 4;
+        this.vx = Math.cos(a) * s; this.vy = Math.sin(a) * s;
+        this.radius = 2 + Math.random() * 3;
+        this.color = color; this.life = 1;
+    }
+    update() { this.x += this.vx; this.y += this.vy; this.vx *= 0.96; this.vy *= 0.96; this.life -= 0.03; }
+    draw() {
+        ctx.globalAlpha = this.life;
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius * this.life, 0, Math.PI * 2);
+        ctx.fillStyle = this.color; ctx.fill();
+        ctx.globalAlpha = 1;
+    }
+}
+
+function handleTap(tx, ty) {
+    if (!gameRunning) return;
+    let caught = false;
+    for (let i = donuts.length - 1; i >= 0; i--) {
+        const d = donuts[i];
+        const dist = Math.hypot(d.x - tx, d.y - ty);
+        if (dist < d.size * 0.7) {
+            // Caught!
+            const points = d.type.points * (1 + combo * 0.1);
+            score += Math.floor(points);
+            combo++;
+            d.caught = true;
+
+            scorePopups.push(new ScorePopup(d.x, d.y, `+${Math.floor(points)}`, d.type.isCoffee ? '#8B6914' : '#006B3F'));
+            if (combo > 1) scorePopups.push(new ScorePopup(d.x, d.y + 20, `${combo} COMBO!`, '#C8102E'));
+
+            for (let j = 0; j < 8; j++) particles.push(new Particle(d.x, d.y, d.type.color));
+
+            if (d.type.isCoffee) playBonusSfx(); else playCatchSfx();
+
+            document.getElementById('scoreText').textContent = score + '점';
+            document.getElementById('comboText').textContent = combo > 1 ? `${combo} COMBO!` : '';
+            donuts.splice(i, 1);
+            caught = true;
+            break;
+        }
+    }
+    if (!caught) {
+        combo = 0;
+        document.getElementById('comboText').textContent = '';
+    }
+}
+
+canvas.addEventListener('click', e => handleTap(e.clientX, e.clientY));
+canvas.addEventListener('touchstart', e => { e.preventDefault(); handleTap(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
+
+function drawBackground() {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, W, H);
+
+    // Logo - crisp and clear
+    if (imgLogo.complete && imgLogo.naturalWidth > 0) {
+        const logoW = 280;
+        const logoH = logoW * (imgLogo.naturalHeight / imgLogo.naturalWidth);
+        ctx.globalAlpha = 0.2;
+        ctx.drawImage(imgLogo, W/2 - logoW/2, H/2 - logoH/2, logoW, logoH);
+        ctx.globalAlpha = 1;
+    }
+
+    // Subtle green bottom bar
+    const g = ctx.createLinearGradient(0, H - 60, 0, H);
+    g.addColorStop(0, 'rgba(0, 107, 63, 0)');
+    g.addColorStop(1, 'rgba(0, 107, 63, 0.05)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, H - 60, W, 60);
+}
+
+function getCouponMessage(s) {
+    if (s >= 2000) return '더즌박스 20% 할인 쿠폰 획득!';
+    if (s >= 1000) return '도넛 1+1 쿠폰 획득!';
+    if (s >= 500) return '아메리카노 10% 할인 쿠폰 획득!';
+    return '아쉽지만 쿠폰 미달! 다시 도전하세요!';
+}
+
+function gameLoop() {
+    if (!gameRunning) return;
+
+    // Spawn
+    const spawnRate = Math.max(12, 30 - (30 - timeLeft) * 0.5);
+    if (Math.random() < 1 / spawnRate) donuts.push(new Donut());
+
+    // Update
+    donuts.forEach(d => d.update());
+    particles.forEach(p => p.update());
+    scorePopups.forEach(s => s.update());
+
+    // Miss - donut falls off screen
+    donuts = donuts.filter(d => {
+        if (d.y > H + d.size) {
+            missCount++;
+            combo = 0;
+            document.getElementById('comboText').textContent = '';
+            document.getElementById('missText').textContent = `놓침: ${missCount}`;
+            playMissSfx();
+            return false;
+        }
+        return true;
+    });
+
+    particles = particles.filter(p => p.life > 0);
+    scorePopups = scorePopups.filter(s => s.life > 0);
+
+    // Draw
+    drawBackground();
+    donuts.forEach(d => d.draw());
+    particles.forEach(p => p.draw());
+    scorePopups.forEach(s => s.draw());
+
+    requestAnimationFrame(gameLoop);
+}
+
+function startGame() {
+    document.getElementById('startScreen').classList.add('hidden');
+    document.getElementById('gameOverScreen').classList.add('hidden');
+    document.getElementById('hud').classList.remove('hidden');
+
+    score = 0; combo = 0; timeLeft = 30; missCount = 0;
+    donuts = []; particles = []; scorePopups = [];
+
+    document.getElementById('scoreText').textContent = '0점';
+    document.getElementById('comboText').textContent = '';
+    document.getElementById('timeText').textContent = '30초';
+    document.getElementById('missText').textContent = '';
+
+    initAudio();
+    startBGM();
+    gameRunning = true;
+
+    gameTimer = setInterval(() => {
+        timeLeft--;
+        document.getElementById('timeText').textContent = `${timeLeft}초`;
+        if (timeLeft <= 0) gameOver();
+    }, 1000);
+
+    requestAnimationFrame(gameLoop);
+}
+
+function gameOver() {
+    gameRunning = false;
+    stopBGM();
+    playEndSfx();
+    if (gameTimer) { clearInterval(gameTimer); gameTimer = null; }
+
+    if (score > highScore) { highScore = score; localStorage.setItem('kk_high', highScore); }
+
+    document.getElementById('finalScore').textContent = score + '점';
+    document.getElementById('couponMsg').textContent = getCouponMessage(score);
+    document.getElementById('hud').classList.add('hidden');
+    document.getElementById('nameWrap').style.display = 'flex';
+    document.getElementById('nameInput').value = '';
+    renderRankings(-1, 'rankingList');
+
+    setTimeout(() => document.getElementById('gameOverScreen').classList.remove('hidden'), 500);
+}
+
+// Init start screen ranking
+renderRankings(-1, 'startRankingList');
+</script>
+</body>
+</html>
